@@ -59,7 +59,6 @@ public class Seek {
 		seekStuffLock.lock();
 		try{
 			Seek sk = new Seek(client, boardSize, timeContingent, timeIncrement, clr, komi, pieces, capstones, unrated, tournament, triggerMove, timeAmount, opponent, pntId);
-			System.out.println("Print Seek " + sk.toString());
 			addSeek(sk);
 			return sk;
 		}
@@ -100,7 +99,7 @@ public class Seek {
 		try{
 			Seek sk=Seek.seeks.get(b);
 			Seek.seeks.remove(b);
-			updateListeners("remove "+sk.toString());
+			updateListeners("remove ", sk.buildSeekStringArray());
 		}
 		finally{
 			seekStuffLock.unlock();
@@ -113,7 +112,7 @@ public class Seek {
 			sk.client.removeSeeks();
 			sk.client.seek = sk;
 			Seek.seeks.put(sk.no, sk);
-			updateListeners("new " + sk.toString());
+			updateListeners("new ",  sk.buildSeekStringArray());
 		}
 		finally{
 			seekStuffLock.unlock();
@@ -124,7 +123,12 @@ public class Seek {
 		seekStuffLock.lock();
 		try{
 			for (Integer no : Seek.seeks.keySet()) {
-				c.send("Seek new "+Seek.seeks.get(no));
+				String[] st = Seek.seeks.get(no).buildSeekStringArray();
+				if (c.protocolVersion <= 1) {
+					c.send("Seek new " + st[0]);
+				} else {
+					c.send("Seek new " + st[1]);
+				}
 			}
 		}
 		finally{
@@ -179,11 +183,16 @@ public class Seek {
 		}
 	}
 	
-	static void updateListeners(final String st) {
+	static void updateListeners(String type, final String[] st) {
 		seekStuffLock.lock();
 		try{
 			for (Client cc : seekListeners) {
-				cc.sendWithoutLogging("Seek " + st);
+				// check if the client protocol version is >= 1 send the first
+				if (cc.protocolVersion <= 1) {
+					cc.sendWithoutLogging("Seek "+ type + st[0]);
+				} else {
+					cc.sendWithoutLogging("Seek "+ type + st[1]);
+				}
 			}
 		}
 		finally{
@@ -201,8 +210,7 @@ public class Seek {
 		}
 	}
 
-	@Override
-	public String toString() {
+	public String[] buildSeekStringArray() {
 		seekStuffLock.lock();
 		try{
 			String clr = "A";
@@ -211,8 +219,8 @@ public class Seek {
 			else if(color == COLOR.BLACK)
 				clr = "B";
 			String playerName = client.player.getName();
-
-			return String.join(" ", new String[]{
+			System.out.println("bot: " + client.player.isBot());
+			String v1Seek = String.join(" ", new String[]{
 					Integer.toString(no),
 					playerName,
 					Integer.toString(boardSize),
@@ -228,6 +236,25 @@ public class Seek {
 					Integer.toString(timeAmount),
 					opponent
 			});
+			String v2Seek = String.join(" ", new String[]{
+					Integer.toString(no),
+					playerName,
+					Integer.toString(boardSize),
+					Integer.toString(time),
+					Integer.toString(incr),
+					clr,
+					Integer.toString(komi),
+					Integer.toString(pieces),
+					Integer.toString(capstones),
+					Integer.toString(unrated),
+					Integer.toString(tournament),
+					Integer.toString(triggerMove),
+					Integer.toString(timeAmount),
+					opponent.length() != 0 ? opponent : "0",
+					client.player.isBot() ? "1" : "0"
+			});
+			// return both v1 and v2 seek
+			return new String[]{v1Seek, v2Seek};
 		}
 		finally{
 			seekStuffLock.unlock();

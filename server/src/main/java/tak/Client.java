@@ -13,10 +13,12 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
+import java.util.Timer;
+import java.util.TimerTask;
 import tak.FlowMessages.GameUpdate;
 import tak.utils.BadWordFilter;
 import tak.utils.ConcurrentHashSet;
+import java.util.ArrayList;
 
 /*
  * To change this license header, choose License Headers in Project Properties.
@@ -33,6 +35,10 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 	Player player = null;
 	int clientNo;
 	public int protocolVersion=0;
+	private static final long STALE_CONNECTION_TIMEOUT = 60000; // 60 seconds
+	private static final long CLEANUP_INTERVAL = 30000; // 30 seconds
+	private static Timer cleanupTimer;
+	private long lastActivity;
 
 	static AtomicInteger totalClients = new AtomicInteger(0);
 
@@ -168,11 +174,23 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 	String setString = "sudo set ([a-zA-Z]{3,15}) ([a-zA-Z][a-zA-Z0-9_]{3,15}) ([^\n\r\\s]{6,100})";
 	Pattern setPattern;
 
+	// mod strings
 	String modString = "sudo mod ([a-zA-Z][a-zA-Z0-9_]{3,15})";
 	Pattern modPattern;
-
 	String unModString = "sudo unmod ([a-zA-Z][a-zA-Z0-9_]{3,15})";
 	Pattern unModPattern;
+	
+	// admin strings
+	String adminString = "sudo admin ([a-zA-Z][a-zA-Z0-9_]{3,15})";
+	Pattern adminPattern;
+	String unAdminString = "sudo unadmin ([a-zA-Z][a-zA-Z0-9_]{3,15})";
+	Pattern unAdminPattern;
+	
+	// bot strings
+	String botString = "sudo bot ([a-zA-Z][a-zA-Z0-9_]{3,15})";
+	Pattern botPattern;
+	String unBotString = "sudo unbot ([a-zA-Z][a-zA-Z0-9_]{3,15})";
+	Pattern unBotPattern;
 
 	String broadcastString = "sudo broadcast ([^\n\r]{1,256})";
 	Pattern broadcastPattern;
@@ -180,6 +198,7 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 	Client(Websocket socket) {
 		websocket = socket;
 		this.clientNo = totalClients.incrementAndGet();
+		this.lastActivity = System.currentTimeMillis(); 
 
 		loginPattern = Pattern.compile(loginString);
 		registerPattern = Pattern.compile(registerString);
@@ -225,6 +244,10 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 		setPattern = Pattern.compile(setString);
 		modPattern = Pattern.compile(modString);
 		unModPattern = Pattern.compile(unModString);
+		adminPattern = Pattern.compile(adminString);
+		botPattern = Pattern.compile(botString);
+		unBotPattern = Pattern.compile(unBotString);
+		unAdminPattern = Pattern.compile(unAdminString);
 		broadcastPattern = Pattern.compile(broadcastString);
 
 		clientConnections.add(this);
@@ -287,6 +310,11 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 		}
 	}
 
+	// method to update lastActivity timestamp
+	public void updateLastActivity() {
+			this.lastActivity = System.currentTimeMillis();
+	}
+
 	void clientQuit() throws IOException {
 		clientConnections.remove(this);
 
@@ -304,6 +332,7 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 
 			player.loggedOut();
 			sendAllOnline("Online "+clientConnections.size());
+			onlinePlayerMessageHandler();
 		}
 
 		websocket.kill(201);
@@ -316,6 +345,43 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 
 	void disconnect() {
 		websocket.kill(202);
+	}
+	
+	// Add static initializer block to start the timer when class loads
+	static {
+			cleanupTimer = new Timer("ConnectionCleanupTimer", true); // true makes it a daemon thread
+			cleanupTimer.scheduleAtFixedRate(new TimerTask() {
+					@Override
+					public void run() {
+							try {
+									cleanupStaleConnections();
+							} catch (Exception e) {
+									TakServer.Log("Error in cleanup timer: " + e.getMessage());
+							}
+					}
+			}, CLEANUP_INTERVAL, CLEANUP_INTERVAL);
+	}
+	
+	public static void cleanupStaleConnections() {
+		int before = clientConnections.size();
+		long now = System.currentTimeMillis();
+
+		clientConnections.forEach(client -> {
+				if (client.websocket.streamended || 
+						(now - client.lastActivity > STALE_CONNECTION_TIMEOUT)) {
+						try {
+								TakServer.Log("Cleaning up stale connection for client: " + client.clientNo);
+								client.clientQuit();
+						} catch (IOException e) {
+								TakServer.Log("Error cleaning up stale connection: " + e.getMessage());
+						}
+				}
+		});
+
+		int after = clientConnections.size();
+		if (before != after) {
+				TakServer.Log("Cleanup removed " + (before - after) + " stale connections");
+		}
 	}
 
 	@Override
@@ -346,6 +412,7 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 					if(player!=null){
 						player.lastActivity=System.nanoTime();
 					}
+					updateLastActivity();
 					sendWithoutLogging("OK");
 					temp=null;
 					continue;
@@ -365,7 +432,7 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 							sendWithoutLogging("OK");
 						}
 					}
-					//Protocol version, while this has not been set, the protocol is version 0, which must be supported.
+					// What protocol version is this client using
 					else if((m = protocolPattern.matcher(temp)).find()){
 						this.protocolVersion=Integer.parseInt(m.group(1));
 						sendWithoutLogging("OK");
@@ -406,6 +473,7 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 							Game.registerGameListListener(player);
 
 							sendAllOnline("Online "+clientConnections.size());
+							onlinePlayerMessageHandler();
 						}
 						finally{
 							Player.loginLock.unlock();
@@ -448,6 +516,7 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 										Game.registerGameListListener(player);
 
 										sendAllOnline("Online "+clientConnections.size());
+										onlinePlayerMessageHandler();
 									}
 								} else
 									send("Authentication failure");
@@ -526,7 +595,6 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 					//List all seeks
 					if ((m = listPattern.matcher(temp)).find()) {
 						Seek.sendListTo(this);
-
 					}
 					//Seek a game V3
 					else if (game==null && (m = seekV3Pattern.matcher(temp)).find()) {
@@ -917,6 +985,15 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 		}
 	}
 
+	public void onlinePlayerMessageHandler () {
+		ArrayList<String> playerNames = new ArrayList<>();
+		for(Client c: clientConnections) {
+			if(c.player != null && !c.player.isbot)
+				playerNames.add('"' + c.player.getName() + '"');
+		}
+		sendAllOnline("OnlinePlayers "+ playerNames);
+	}
+
 	public void addToRoom(String room) {
 		chatRooms.add(room);
 		ChatRoom.joinRoom(room,this);
@@ -963,7 +1040,7 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 			}
 
 			if(!moreRights(p)) {
-				sendSudoReply("You dont have rights");
+				sendSudoReply("You don't have rights");
 				return;
 			}
 
@@ -1056,7 +1133,7 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 			sendSudoReply(p.getName()+" kicked");
 			sendSudoReply(p.getName()+" banned");
 		}
-		//unban player
+		// un-ban player
 		else if((m=unBanPattern.matcher(msg)).find()) {
 			String name = m.group(1);
 			Player p = Player.players.get(name);
@@ -1080,11 +1157,7 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 		}
 		// list commands
 		else if((m=listCmdPattern.matcher(msg)).find()) {
-			// privileged commands - only for admins
-			if(!player.isAdmin()) {
-				sendSudoReply("command not found");
-				return;
-			}
+			// privileged commands - only for admins and mods
 			// return gag list
 			if("gag".equals(m.group(1))) {
 				String res="[";
@@ -1109,6 +1182,13 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 
 				sendSudoReply(res+"]");
 			}
+			// admin list
+			else if ("admin".equals(m.group(1))) {
+				String res = "[";
+				for(Player p: Player.adminList)
+					res += p.getName()+", ";
+				sendSudoReply(res+"]");
+			}
 			else if("online".equals(m.group(1))) {
 					String res = "[";
 					for(Client c: clientConnections) {
@@ -1118,68 +1198,146 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 					sendSudoReply(res+"]");
 			} else {
 				sendSudoReply("command not found");
-				// privileged commands - only for admins
 			}
 		}
-		else if((m=reloadWordCmdPattern.matcher(msg)).find()) {
-			// privileged commands - only for admins
+		// admin commands
+		// broadcast message
+		else if((m=broadcastPattern.matcher(msg)).find()) {
 			if(!player.isAdmin()) {
-				sendSudoReply("command not found");
+				sendSudoReply("Permission denied");
+				return;
+			}
+			String bmsg = m.group(1);
+			Client.sendAllOnline(bmsg);
+			return;
+		}
+		// reload bad word filter
+		else if((m=reloadWordCmdPattern.matcher(msg)).find()) {
+			if(!player.isAdmin()) {
+				sendSudoReply("Permission denied");
 				return;
 			}
 			BadWordFilter.loadConfigs();
+			sendSudoReply("Bad word filter reloaded");
 		}
-		else {
-			// privileged commands - only for admin
+		// add mods
+		else if((m=modPattern.matcher(msg)).find()) {
 			if(!player.isAdmin()) {
-				sendSudoReply("command not found");
+				sendSudoReply("Permission denied");
 				return;
 			}
-			// add mods
-			if((m=modPattern.matcher(msg)).find()) {
-				String name = m.group(1);
-				System.out.println("here "+name+" "+msg);
-				Player p = Player.players.get(name);
-				if(p == null) {
-					sendSudoReply("No such player");
-					return;
-				}
-				p.setMod();
-				p.setModInDB(name, 1);
-				sendSudoReply("Added "+p.getName()+" as moderator");
+			String name = m.group(1);
+			Player p = Player.players.get(name);
+			if(p == null) {
+				sendSudoReply("No such player");
+				return;
 			}
-			// Remove mod from list
-			else if((m=unModPattern.matcher(msg)).find()) {
-				String name = m.group(1);
-				Player p = Player.players.get(name);
-				if(p == null) {
-					sendSudoReply("No such player");
-					return;
-				}
-				p.unMod();
-				p.setModInDB(name, 0);
-				sendSudoReply("Removed "+p.getName()+" as moderator");
+			p.setMod();
+			p.setModInDB(name, 1);
+			sendSudoReply("Added "+p.getName()+" as moderator");
+		}
+		// Remove mod from list
+		else if((m=unModPattern.matcher(msg)).find()) {
+			if(!player.isAdmin()) {
+				sendSudoReply("Permission denied");
+				return;
 			}
-			// Admin set password for user
-			else if((m=setPattern.matcher(msg)).find()) {
-				String param = m.group(1);
-				String name = m.group(2);
-				String value = m.group(3);
+			String name = m.group(1);
+			Player p = Player.players.get(name);
+			if(p == null) {
+				sendSudoReply("No such player");
+				return;
+			}
+			p.unMod();
+			p.setModInDB(name, 0);
+			sendSudoReply("Removed "+p.getName()+" as moderator");
+		}
+		// add admin
+		else if((m=adminPattern.matcher(msg)).find()) {
+			if(!player.isAdmin()) {
+				sendSudoReply("Permission denied");
+				return;
+			}
+			String name = m.group(1);
+			Player p = Player.players.get(name);
+			if(p == null) {
+				sendSudoReply("No such player");
+				return;
+			}
+			p.setAdmin();
+			p.setAdminInDB(name, 1);
+			sendSudoReply("Added "+p.getName()+" as admin");
+		}
+		// Remove admin from list
+		else if((m=unAdminPattern.matcher(msg)).find()) {
+			if(!player.isAdmin()) {
+				sendSudoReply("Permission denied");
+				return;
+			}
+			String name = m.group(1);
+			Player p = Player.players.get(name);
+			if(p == null) {
+				sendSudoReply("No such player");
+				return;
+			}
+			p.unAdmin();
+			p.setAdminInDB(name, 0);
+			sendSudoReply("Removed "+p.getName()+" as admin");
+		}
+		// set bot
+		else if((m=botPattern.matcher(msg)).find()) {
+			if(!player.isAdmin()) {
+				sendSudoReply("Permission denied");
+				return;
+			}
+			String name = m.group(1);
+			Player p = Player.players.get(name);
+			if(p == null) {
+				sendSudoReply("No such player");
+				return;
+			}
+			p.setBot();
+			p.setBotInDB(name, 1);
+			sendSudoReply("Added "+p.getName()+" as bot");
+		}
+		// un set bot
+		else if((m=unBotPattern.matcher(msg)).find()) {
+			if(!player.isAdmin()) {
+				sendSudoReply("Permission denied");
+				return;
+			}
+			String name = m.group(1);
+			Player p = Player.players.get(name);
+			if(p == null) {
+				sendSudoReply("No such player");
+				return;
+			}
+			p.unBot();
+			p.setBotInDB(name, 0);
+			sendSudoReply("Removed "+p.getName()+" as bot");
+		}
+		// Admin set password for user
+		else if((m=setPattern.matcher(msg)).find()) {
+			if(!player.isAdmin()) {
+				sendSudoReply("Permission denied");
+				return;
+			}
+			String param = m.group(1);
+			String name = m.group(2);
+			String value = m.group(3);
 
-				Player p = Player.players.get(name);
-				if(p == null) {
-					sendSudoReply("No such player");
-					return;
-				}
-				if(param.equals("password")) {
-					p.setPassword(value);
-					sendSudoReply("Password set");
-				}
+			Player p = Player.players.get(name);
+			if(p == null) {
+				sendSudoReply("No such player");
+				return;
 			}
-			else if((m=broadcastPattern.matcher(msg)).find()) {
-				String bmsg = m.group(1);
-				Client.sendAllOnline(bmsg);
+			if(param.equals("password")) {
+				p.setPassword(value);
+				sendSudoReply("Password set");
 			}
+		}
+		else {
+			sendSudoReply("Command not found");
 		}
 	}
 

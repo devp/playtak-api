@@ -159,36 +159,38 @@ The *Client*, *Login* and *Register* are the only three commands which work whil
 The server to client messages and their format is as below.
 The list does not include error messages, you're free to poke around and figure out the error messages on your own or look at the code.
 
-|Messages from server|Description|
-|--------------------|-----------|
-|Welcome! |Just a welcome message when connected to server|
-|Login or Register |Login with username/password or login as guest or register after this message|
-|Welcome **name**! |A welcome message indicating that you've logged in as **name**|
-|GameList Add **no** **player_white** **player_black** **size** **original_time** **incr** **komi** **pieces** **capstones** **unrated** **tournament** |Notifies client that a game has started (which the client can observe if it wants)|
-|GameList Remove **no** **player_white** **player_black** **size** **original_time** **incr** **komi** **pieces** **capstones** **unrated** **tournament** |Notifies client that the game has ended|
-|Game Start **no** **size** **player_white** vs **player_black** **your color** **time** **komi** **pieces** **capstones** |Notifies client to start a game. The game no. being **no**, players' names being **white_player**, **black_player** and **your_color** being your color which could be either "white" or "black"|
-|Game#**no** P **Sq** C\|W|The 'Place' move played by the other player in game number **no**. The format is same as the command from client to server|
-|Game#**no** M **Sq1** **Sq2** **no1** **no2**...|The 'Move' move played by the other player in game number **no**. The format is same as the command from client to server|
-|Game#**no** Time **whitetime** **blacktime** |Update the clock with the time specified for white and black players, time given in seconds|
-|Game#**no** Timems **whitetime** **blacktime** |Update the clock with the time specified for white and black players, time given in milliseconds, only sent if the client has opted in to protocol version 1 or later|
-|Game#**no** Over **result**|Game number **no** is over. **result** is one of *R-0*, *0-R*, *F-0*, *0-F*, *1/2-1/2*|
-|Game#**no** OfferDraw |Indicates the opponent has offered a draw|
-|Game#**no** RemoveDraw |Indicates your opponent has taken back his offer to draw|
-|Game#**no** RequestUndo |Request from opponent to undo the last move|
-|Game#**no** RemoveUndo |Opponent removes his undo request|
-|Game#**no** Undo |Undo the last move. Client is supposed to keep track of previous board states and undo to the last state.|
-|Game#**no** Abandoned. **player** quit|Game number **no** is abandoned by **player** as he quit. Clients can treat this as resign.|
-|Seek new **no** **name** **boardsize** **time** **increment** **W/B/A** **komi** **pieces** **capstones** **unrated** **tournament** **opponent** |There is a new seek with seek no. **no** posted by **name** with board size **boardsize** with **time** seconds for each player. W, B or A denotes the color of the seeker, **opponent** is the name of the player allowed to join, blank to let anyone join |
-|Seek remove **no** **name** **boardsize** **time** **increment** **W/B/A** **komi** **pieces** **capstones** **unrated** **tournament** **opponent** |Existing seek no. **no** is removed (either the client has joined another game or has changed his seek or has quit)|
-|Observe **no** **player_white** **player_black** **size** **original_time** **incr** **komi** **pieces** **capstones** **unrated** **tournament** | Start observing the game number **no** of board size **size** with original time setting of **origin_time** seconds|
-|Shout \<**player**\> **text** |Chat message **text** from **player**|
-|Joined room **room** |Indicates you've joined the room **room**|
-|Left room **room** |Indicates you've left the room **room**|
-|ShoutRoom **room** \<**player**\> **text** |Message **text** from **player** to chat room **room**|
-|Tell \<**player**\> **text** |Private chat message **text** from **player**|
-|Told \<**player**\> **text** |Confirmation that your message is sent to **player**. You'll receive this even if **player** is not logged in|
-|Message **text** |A message from server. Might be used to indicate announcements like name accepted/server going down, etc|
-|Error **text** |An error message|
-|Online **no** |**no** players are connected to server|
-|NOK |Indicates the command client send is invalid or unrecognized|
-|OK  |Indicates previous command is ok. Clients can ignore this. *I might remove this message altogether in future as it serves no real purpose*|
+|Messages from server|Description|Protocol Version
+|--------------------|-----------|-----------|
+|Welcome! |Just a welcome message when connected to server|>= 0
+|Login or Register |Login with username/password or login as guest or register after this message|>= 0
+|Welcome **name**! |A welcome message indicating that you've logged in as **name**|>= 0
+|GameList Add **no** **player_white** **player_black** **size** **original_time** **incr** **komi** **pieces** **capstones** **unrated** **tournament** |Notifies client that a game has started (which the client can observe if it wants)|>= 0
+|GameList Remove **no** **player_white** **player_black** **size** **original_time** **incr** **komi** **pieces** **capstones** **unrated** **tournament** |Notifies client that the game has ended|>= 0
+|Game Start **no** **size** **player_white** vs **player_black** **your color** **time** **komi** **pieces** **capstones** |NotifiesNotifies client to start a game. The game no. being **no**, players' names being **white_player**, **black_player** and **your_color** being your color which could be either "white" or "black"|>= 0
+|Game#**no** P **Sq** C\|W|The 'Place' move played by the other player in game number **no**. The format is same as the command from client to server|>= 0
+|Game#**no** M **Sq1** **Sq2** **no1** **no2**...|The 'Move' move played by the other player in game number **no**. The format is same as the command from client to server|>= 0
+|Game#**no** Time **whitetime** **blacktime** |Update the clock with the time specified for white and black players, time given in seconds| = 0
+|Game#**no** Timems **whitetime** **blacktime** |Update the clock with the time specified for white and black players, time given in milliseconds, only sent if the client has opted in to protocol version 1 or later| >=1
+|Game#**no** Over **result**|Game number **no** is over. **result** is one of *R-0*, *0-R*, *F-0*, *0-F*, *1/2-1/2*| >= 0
+|Game#**no** OfferDraw |Indicates the opponent has offered a draw|>= 0
+|Game#**no** RemoveDraw |Indicates your opponent has taken back his offer to draw|>= 0
+|Game#**no** RequestUndo |Request from opponent to undo the last move|>= 0
+|Game#**no** RemoveUndo |Opponent removes his undo request|>= 0
+|Game#**no** Undo |Undo the last move. Client is supposed to keep track of previous board states and undo to the last state.|>= 0
+|Game#**no** Abandoned. **player** quit|Game number **no** is abandoned by **player** as he quit. Clients can treat this as resign.|>= 0
+|Seek new **no** **name** **boardsize** **time** **increment** **W/B/A** **komi** **pieces** **capstones** **unrated** **tournament** **opponent** |There is a new seek with seek no. **no** posted by **name** with board size **boardsize** with **time** seconds for each player. W, B or A denotes the color of the seeker, **opponent** is the name of the player allowed to join, blank to let anyone join | <= 1
+|Seek remove **no** **name** **boardsize** **time** **increment** **W/B/A** **komi** **pieces** **capstones** **unrated** **tournament** **opponent** |Existing seek no. **no** is removed (either the client has joined another game or has changed his seek or has quit)|<= 1
+|Seek new **no** **name** **boardsize** **time** **increment** **W/B/A** **komi** **pieces** **capstones** **unrated** **tournament** **opponent** **Bot Seek**  |There is a new seek with seek no. **no** posted by **name** with board size **boardsize** with **time** seconds for each player. W, B or A denotes the color of the seeker, **opponent** is the name of the player allowed to join, 0 to let anyone join, bot seek 1 if created by a bot or 0 if not | >= 2
+|Seek remove **no** **name** **boardsize** **time** **increment** **W/B/A** **komi** **pieces** **capstones** **unrated** **tournament** **opponent** **Bot Seek** |Existing seek no. **no** is removed (either the client has joined another game or has changed his seek or has quit)| >= 2
+|Observe **no** **player_white** **player_black** **size** **original_time** **incr** **komi** **pieces** **capstones** **unrated** **tournament** | Start observing the game number **no** of board size **size** with original time setting of **origin_time** seconds| >= 0
+|Shout \<**player**\> **text** |Chat message **text** from **player**|>= 0
+|Joined room **room** |Indicates you've joined the room **room**|>= 0
+|Left room **room** |Indicates you've left the room **room**|>= 0
+|ShoutRoom **room** \<**player**\> **text** |Message **text** from **player** to chat room **room**|>= 0
+|Tell \<**player**\> **text** |Private chat message **text** from **player**|>= 0
+|Told \<**player**\> **text** |Confirmation that your message is sent to **player**. You'll receive this even if **player** is not logged in|>= 0
+|Message **text** |A message from server. Might be used to indicate announcements like name accepted/server going down, etc|>= 0
+|Error **text** |An error message|>= 0
+|Online **no** |**no** players are connected to server|>= 0
+|NOK |Indicates the command client send is invalid or unrecognized|>= 0
+|OK  |Indicates previous command is ok. Clients can ignore this. *I might remove this message altogether in future as it serves no real purpose*|>= 0

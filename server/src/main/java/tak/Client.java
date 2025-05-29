@@ -762,22 +762,9 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 
 									player.setGame(game);
 									otherClient.player.setGame(game);
-									String msg = "";
-									String msg2 = "";
-									if (this.protocolVersion >= 2) {
-										msg += "Game Start " + game.no +" "+game.white.getName()+" vs "+game.black.getName();
-										msg2 += sz + " " + time + " " + sk.incr + " " + sk.komi + " " + sk.pieces + " " + sk.capstones + " " + sk.unrated + " " + sk.tournament + " " + sk.triggerMove + " " + sk.timeAmount + " ";
-										if (sk.botSeek == 1) {
-											msg2 += "1";
-										} else {
-											msg2 += "0";
-										}
-									} else  {
-										msg += "Game Start " + game.no +" "+sz+" "+game.white.getName()+" vs "+game.black.getName();
-										msg2 += time + " " + sk.komi + " " + sk.pieces + " " + sk.capstones + " " + sk.triggerMove + " " + sk.timeAmount;
-									}
-									send(msg+" "+((game.white==player)?"white":"black")+" "+msg2);
-									otherClient.send(msg+" "+((game.white==otherClient.player)?"white":"black")+" "+msg2);
+									send(createGameStartString(this.protocolVersion, game, sk, player));
+
+									otherClient.send(createGameStartString(otherClient.protocolVersion, game, sk, otherClient.player));
 								}
 								finally{
 									game.gameLock.unlock();
@@ -1040,6 +1027,24 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 				Logger.getLogger(Client.class.getName()).log(Level.SEVERE, null, ex);
 			}
 		}
+	}
+
+	private static String createGameStartString(int protocolVersion, Game game, Seek sk, Player player) {
+		String msg = "";
+		String msg2 = "";
+		if (protocolVersion < 2) {
+			msg += "Game Start " + game.no + " " + sk.boardSize + " " + game.white.getName() + " vs " + game.black.getName();
+			msg2 += sk.time + " " + sk.komi + " " + sk.pieces + " " + sk.capstones + " " + sk.triggerMove + " " + sk.timeAmount;
+		} else  {
+			msg += "Game Start " + game.no +" "+game.white.getName()+" vs "+game.black.getName();
+			msg2 += sk.boardSize + " " + sk.time + " " + sk.incr + " " + sk.komi + " " + sk.pieces + " " + sk.capstones + " " + sk.unrated + " " + sk.tournament + " " + sk.triggerMove + " " + sk.timeAmount + " ";
+			if (sk.botSeek == 1) {
+				msg2 += "1";
+			} else {
+				msg2 += "0";
+			}
+		}
+		return msg + " " + ((game.white == player) ? "white" : "black") + " " + msg2;
 	}
 
 	public void onlinePlayerMessageHandler () {

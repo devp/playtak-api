@@ -1380,7 +1380,11 @@ public class Game implements Publisher<GameUpdate>{
 		try{
 			Player otherP = otherPlayer(p);
 			String m = "";
-			if(p.client.protocolVersion >= 2) {
+			if(p.client.protocolVersion < 2) {
+				m += "Game Start " + no +" "+board.boardSize+" "+white.getName()+" vs "+black.getName() + " ";
+				m += ((white==p)?"white":"black")+" ";
+				m += (originalTime/1000) + " " + komi + " " + tileCount + " " + capCount + " " + triggerMove + " " + timeAmount / 1000;
+			} else {
 				m += "Game Start " + no + " " + white.getName() + " vs " + black.getName() + " ";
 				m += ((white==p)?"white":"black") + " ";
 				m += board.boardSize + " " + (originalTime/1000) + " " + incrementTime / 1000 + " " + komi + " " + tileCount + " " + capCount + " " + unrated + " " + tournament + " " + triggerMove + " " + timeAmount / 1000 + " ";
@@ -1389,10 +1393,6 @@ public class Game implements Publisher<GameUpdate>{
 				} else {
 					m += "0";
 				}
-			} else {
-				m += "Game Start " + no +" "+board.boardSize+" "+white.getName()+" vs "+black.getName() + " ";
-				m += ((white==p)?"white":"black")+" ";
-				m += (originalTime/1000) + " " + komi + " " + tileCount + " " + capCount + " " + triggerMove + " " + timeAmount / 1000;
 			}
 			p.send(m);
 

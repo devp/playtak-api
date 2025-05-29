@@ -106,6 +106,9 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 	String seekV1String = "^Seek (\\d) (\\d+) (\\d+)( [WB])?";
 	Pattern seekV1Pattern;
 
+	String rematchString = "^Rematch (\\d+) (\\d+) (\\d+) (\\d+) ([WBA]) (\\d+) (\\d+) (\\d+) (0|1) (0|1) (\\d+) (\\d+) ([A-Za-z0-9_]*)";
+	Pattern rematchPattern;
+
 	String acceptSeekString = "^Accept (\\d+)";
 	Pattern acceptSeekPattern;
 
@@ -218,6 +221,7 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 		seekV3Pattern = Pattern.compile(seekV3String);
 		seekV2Pattern = Pattern.compile(seekV2String);
 		seekV1Pattern = Pattern.compile(seekV1String);
+		rematchPattern = Pattern.compile(rematchString);
 		acceptSeekPattern = Pattern.compile(acceptSeekString);
 		listPattern = Pattern.compile(listString);
 		gameListPattern = Pattern.compile(gameListString);
@@ -758,9 +762,20 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 
 									player.setGame(game);
 									otherClient.player.setGame(game);
-
-									String msg = "Game Start " + game.no +" "+sz+" "+game.white.getName()+" vs "+game.black.getName();
-									String msg2 = time + " " + sk.komi + " " + sk.pieces + " " + sk.capstones + " " + sk.triggerMove + " " + sk.timeAmount;
+									String msg = "";
+									String msg2 = "";
+									if (this.protocolVersion >= 2) {
+										msg += "Game Start " + game.no +" "+game.white.getName()+" vs "+game.black.getName();
+										msg2 += sz + " " + time + " " + sk.incr + " " + sk.komi + " " + sk.pieces + " " + sk.capstones + " " + sk.unrated + " " + sk.tournament + " " + sk.triggerMove + " " + sk.timeAmount + " ";
+										if (sk.botSeek == 1) {
+											msg2 += "1";
+										} else {
+											msg2 += "0";
+										}
+									} else  {
+										msg += "Game Start " + game.no +" "+sz+" "+game.white.getName()+" vs "+game.black.getName();
+										msg2 += time + " " + sk.komi + " " + sk.pieces + " " + sk.capstones + " " + sk.triggerMove + " " + sk.timeAmount;
+									}
 									send(msg+" "+((game.white==player)?"white":"black")+" "+msg2);
 									otherClient.send(msg+" "+((game.white==otherClient.player)?"white":"black")+" "+msg2);
 								}
@@ -769,6 +784,48 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 								}
 							} else {
 								sendNOK();
+							}
+						}
+						finally{
+							Seek.seekStuffLock.unlock();
+						}
+					}
+					// handle rematch request
+					else if (game == null && (m = rematchPattern.matcher(temp)).find()) {
+						// create a new private seek for rematch if both players send a rematch request then have the second player accept it
+						Seek.seekStuffLock.lock();
+						try{
+							if (seek != null) {
+								Seek.removeSeek(seek.no);
+							}
+							Seek sk = null;
+							// loop through all the seek hash map and check is a seek data contains the rematch id
+							for (Seek s : Seek.seeks.values()) {
+								if (s.rematchId == Integer.parseInt(m.group(1))) {
+									sk = s;
+									break;
+								}
+							}
+							// if the client player is the opponent of the rematch seek, accept it
+							if (sk != null && sk.opponent.toLowerCase().equals(player.getName().toLowerCase())) {
+								send("Accept Rematch " + sk.no);
+							} else  {
+								seek = Seek.newRematchSeek(
+										this,
+										Integer.parseInt(m.group(1)), // ID
+										Integer.parseInt(m.group(2)), // size
+										Integer.parseInt(m.group(3)), // time
+										Integer.parseInt(m.group(4)), // increment
+										m.group(5), // color
+										Integer.parseInt(m.group(6)), // komi
+										Integer.parseInt(m.group(7)), // pieces
+										Integer.parseInt(m.group(8)), // capstones
+										Integer.parseInt(m.group(9)), // unrated
+										Integer.parseInt(m.group(10)), // tournament
+										Integer.parseInt(m.group(11)), // triggerMove
+										Integer.parseInt(m.group(12)), // timeAmount
+										m.group(13)); // opponent
+								send("Rematch seek created with ID: " + seek.no);
 							}
 						}
 						finally{

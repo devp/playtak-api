@@ -37,6 +37,8 @@ public class Seek {
 	int timeAmount;
 	String opponent;
 	COLOR color;
+	int botSeek;
+	int rematchId;
 
 	public static Lock seekStuffLock = new ReentrantLock(); // this locks out all other threads
 	
@@ -58,7 +60,7 @@ public class Seek {
 
 		seekStuffLock.lock();
 		try{
-			Seek sk = new Seek(client, boardSize, timeContingent, timeIncrement, clr, komi, pieces, capstones, unrated, tournament, triggerMove, timeAmount, opponent, pntId);
+			Seek sk = new Seek(client, boardSize, timeContingent, timeIncrement, clr, komi, pieces, capstones, unrated, tournament, triggerMove, timeAmount, opponent, pntId, -1);
 			addSeek(sk);
 			return sk;
 		}
@@ -67,12 +69,13 @@ public class Seek {
 		}
 	}
 	
-	Seek(Client client, int boardSize, int timeContingent, int timeIncrement, COLOR clr, int komi, int pieces, int capstones, int unrated, int tournament, int triggerMove, int timeAmount, String opponent, Integer pntId) {
+	Seek(Client client, int boardSize, int timeContingent, int timeIncrement, COLOR clr, int komi, int pieces, int capstones, int unrated, int tournament, int triggerMove, int timeAmount, String opponent, Integer pntId, int rematchId) {
 		seekStuffLock.lock();
 		try{
 			this.client = client;
 			no = seekNo.incrementAndGet();
 			this.pntId = pntId;
+			this.rematchId = rematchId;
 			time = timeContingent;
 			incr = timeIncrement;
 			color = clr;
@@ -84,7 +87,11 @@ public class Seek {
 			this.triggerMove = triggerMove;
 			this.timeAmount = timeAmount;
 			this.opponent = opponent;
-
+			if (client.player.isBot()) {
+				this.botSeek = 1;
+			} else {
+				this.botSeek = 0;
+			}
 			if (boardSize < 3 || boardSize > 8)
 				boardSize = DEFAULT_SIZE;
 			this.boardSize = boardSize;
@@ -98,8 +105,10 @@ public class Seek {
 		seekStuffLock.lock();
 		try{
 			Seek sk=Seek.seeks.get(b);
-			Seek.seeks.remove(b);
-			updateListeners("remove ", sk.buildSeekStringArray());
+			if (sk != null) {
+				Seek.seeks.remove(b);
+				updateListeners("remove ", sk.buildSeekStringArray());
+			}
 		}
 		finally{
 			seekStuffLock.unlock();
@@ -118,7 +127,31 @@ public class Seek {
 			seekStuffLock.unlock();
 		}
 	}
-		
+
+	// Rematch ${game.id} ${game.size} ${game.time} ${game.inc} ${game.color} ${game.komi} ${game.pieces} ${game.capstones} ${game.unrated} ${game.tournament} ${game.triggerMove} ${game.timeAmount} ${game.opponent}
+	public static Seek newRematchSeek(Client c, int id, int boardSize, int time, int increment, String color, int komi, int pieces, int capstones, int unrated, int tournament, int triggerMove, int timeAmount, String opponent) {
+		seekStuffLock.lock();
+		try{
+			COLOR colorEnum;
+			if (color.equals("W")) {
+				colorEnum = COLOR.WHITE;
+			} else if (color.equals("B")) {
+				colorEnum = COLOR.BLACK;
+			} else {
+				colorEnum = COLOR.ANY;
+			}
+			c.removeSeeks();
+			Seek sk = new Seek(c, boardSize, time, increment, colorEnum, komi, pieces, capstones, unrated, tournament, triggerMove, timeAmount, opponent, -1, id);
+			c.seek = sk;
+			Seek.seeks.put(sk.no, sk);
+			updateListeners("new ", sk.buildSeekStringArray());
+			return sk;
+		}
+		finally{
+			seekStuffLock.unlock();
+		}
+	}
+
 	static void sendListTo(Client c) {
 		seekStuffLock.lock();
 		try{
@@ -219,7 +252,6 @@ public class Seek {
 			else if(color == COLOR.BLACK)
 				clr = "B";
 			String playerName = client.player.getName();
-			System.out.println("bot: " + client.player.isBot());
 			String v1Seek = String.join(" ", new String[]{
 					Integer.toString(no),
 					playerName,

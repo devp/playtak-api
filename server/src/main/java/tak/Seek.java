@@ -128,7 +128,6 @@ public class Seek {
 		}
 	}
 
-	// Rematch ${game.id} ${game.size} ${game.time} ${game.inc} ${game.color} ${game.komi} ${game.pieces} ${game.capstones} ${game.unrated} ${game.tournament} ${game.triggerMove} ${game.timeAmount} ${game.opponent}
 	public static Seek newRematchSeek(Client c, int id, int boardSize, int time, int increment, String color, int komi, int pieces, int capstones, int unrated, int tournament, int triggerMove, int timeAmount, String opponent) {
 		seekStuffLock.lock();
 		try{

@@ -219,7 +219,7 @@ public class Seek {
 		seekStuffLock.lock();
 		try{
 			for (Client cc : seekListeners) {
-				// check if the client protocol version is >= 1 send the first
+				// check if the client protocol version
 				if (cc.protocolVersion <= 1) {
 					cc.sendWithoutLogging("Seek "+ type + st[0]);
 				} else {

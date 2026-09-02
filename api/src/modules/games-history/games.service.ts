@@ -18,7 +18,7 @@ import { PTNService } from './services/ptn.service';
 const playerMatch = (value: string, param: string) => {
 	if (/[%_]/.test(value)) return Like(`${value}`);
 	return Raw((col) => `${col} = :${param} COLLATE NOCASE`, { [param]: value });
-}
+};
 
 @Injectable()
 export class GamesService {
@@ -224,25 +224,55 @@ export class GamesService {
 		return { search, mirrorSearch, playerWhite, playerBlack };
 	}
 
-	// Turn a query into { which table/view to read, the find `where` }. A plain
-	// one-player mirror search on the default id sort reads the `player_games`
-	// view (see its migration): `player_name = ? AND id > ?` there plans as
-	// MERGE (UNION ALL) over the two NOCASE indexes -- no OR, no temp b-tree.
-	// Everything else -- wildcard, extra filter, explicit id, non-id sort,
-	// mirror off -- reads the `games` table (`[search, mirrorSearch]` = OR).
+	/**
+	 * A mirror search is "this player, on either side". Against the `games`
+	 * table that is `player_white = ? OR player_black = ?`, and on the SQLite
+	 * better-sqlite3 links against (3.53.4) that OR does not use the NOCASE
+	 * player indexes at all -- it plans as `SCAN games`, walking the table in
+	 * rowid order. That is quick only while matches are dense enough to fill a
+	 * page early: for anyone but a mega-bot both the page and the count read
+	 * all 870k rows (~60ms each, measured; see
+	 * scripts/db-profiling/2026-08-snapshot-player-games-view-query-performance.sh).
+	 *
+	 * The `player_games` view (scripts/migrations/2026-08-add-player-games-view.sh)
+	 * is the same OR hoisted into the schema, which SQLite can plan as MERGE
+	 * (UNION ALL) over the two indexes -- already in id order, so a page is
+	 * index-bounded whatever the player's game count.
+	 *
+	 * When the view can be used, planQuery returns the ordinary `search` object
+	 * with the player predicate moved onto `player_name`; every other filter is
+	 * side-independent and ANDs on without disturbing the MERGE.
+	 */
+	private canUsePlayerGamesView(query: GameQuery, playerWhite?: string, playerBlack?: string): boolean {
+		// Without mirror, a player search already resolves to a single index.
+		if (query.mirror !== 'true') return false;
+		// Naming both players is "A vs B", not "X on either side": the view's one
+		// player_name per row can only carry half of it. Naming neither has no
+		// player predicate to hoist.
+		const exactlyOnePlayer = !playerWhite !== !playerBlack;
+		if (!exactlyOnePlayer) return false;
+		// A mirrored game_result depends on which side matched (1-0 one way is 0-1
+		// the other), so it cannot be a plain AND on the view.
+		if (query.game_result) return false;
+		// A wildcard makes the player predicate a LIKE range rather than a point
+		// lookup, and the merged arms are then no longer id-ordered.
+		if (/[%_]/.test(playerWhite || playerBlack)) return false;
+		// Only an id sort comes out of the MERGE for free. Any other sort makes each
+		// arm build its own temp b-tree, and measures no better than the table.
+		return (query.sort || 'id') === 'id';
+	}
+
+	// Turn a query into { which table/view to read, the find `where` }.
 	planQuery(query: GameQuery): { source: 'games' | 'player_games'; where: object | object[] } {
 		const { search, mirrorSearch, playerWhite, playerBlack } = this.generateSearchQuery(query);
-		const mirror = query.mirror === 'true';
-		const idSort = (query.sort || 'id') === 'id' && (query.order || 'DESC') === 'DESC';
-		const onePlayer = playerWhite && !playerBlack ? playerWhite : playerBlack && !playerWhite ? playerBlack : null;
-		const onlyPlayerAndFloor = Object.keys(search).every((k) => k === 'id' || k.startsWith('player_'));
 
-		if (mirror && idSort && onePlayer && !query['id'] && !/[%_]/.test(onePlayer) && onlyPlayerAndFloor) {
-			// reuse the operators generateSearchQuery already built: the player match
-			// Raw is column-agnostic, so it reads fine under `player_name`.
-			return { source: 'player_games', where: { player_name: search['player_white'] || search['player_black'], id: search['id'] } };
+		if (this.canUsePlayerGamesView(query, playerWhite, playerBlack)) {
+			// The player match Raw is column-agnostic, so it reads fine under
+			// `player_name`; the rest of the filters carry over untouched.
+			const { player_white, player_black, ...filters } = search as Record<string, unknown>;
+			return { source: 'player_games', where: { ...filters, player_name: player_white ?? player_black } };
 		}
-		return { source: 'games', where: mirror ? [search, mirrorSearch] : search };
+		return { source: 'games', where: query.mirror === 'true' ? [search, mirrorSearch] : search };
 	}
 
 	async getAll(query?: GameQuery): Promise<any> {

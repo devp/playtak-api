@@ -123,7 +123,7 @@ export class PTNService {
 		const wn = LEGACY_GAMES_ANONYMIZED_FROM_RESULTS && game.date < LEGACY_GAMES_CUTOFF ? 'Anon' : game.player_white;
 		const wr = game.rating_white;
 		const bn = LEGACY_GAMES_ANONYMIZED_FROM_RESULTS && game.date < LEGACY_GAMES_CUTOFF ? 'Anon' : game.player_black;
-		const wb = game.rating_black;
+		const br = game.rating_black;
 
 		ptn += this.getHeader('Site', 'PlayTak.com');
 		ptn += this.getHeader('Event', 'Online Play');
@@ -137,7 +137,7 @@ export class PTNService {
 		ptn += this.getHeader('Player1', wn);
 		if (wr) ptn += this.getHeader('Rating1', wr);
 		ptn += this.getHeader('Player2', bn);
-		if (wb) ptn += this.getHeader('Rating2', wb);
+		if (br) ptn += this.getHeader('Rating2', br);
 		ptn += this.getHeader(
 			'Clock',
 			this.getTimerInfo(

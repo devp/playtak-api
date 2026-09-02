@@ -25,6 +25,8 @@ export class GamesService {
 	constructor(
 		@InjectRepository(Games, 'games')
 		private repository: Repository<Games>,
+		@InjectRepository(PlayerGames, 'games')
+		private playerGamesRepository: Repository<PlayerGames>,
 		private ptnService: PTNService
 	) {}
 
@@ -219,39 +221,42 @@ export class GamesService {
 			}
 		}
 
-		return { search, mirrorSearch };
+		return { search, mirrorSearch, playerWhite, playerBlack };
+	}
+
+	// Turn a query into { which table/view to read, the find `where` }. A plain
+	// one-player mirror search on the default id sort reads the `player_games`
+	// view (see its migration): `player_name = ? AND id > ?` there plans as
+	// MERGE (UNION ALL) over the two NOCASE indexes -- no OR, no temp b-tree.
+	// Everything else -- wildcard, extra filter, explicit id, non-id sort,
+	// mirror off -- reads the `games` table (`[search, mirrorSearch]` = OR).
+	planQuery(query: GameQuery): { source: 'games' | 'player_games'; where: object | object[] } {
+		const { search, mirrorSearch, playerWhite, playerBlack } = this.generateSearchQuery(query);
+		const mirror = query.mirror === 'true';
+		const idSort = (query.sort || 'id') === 'id' && (query.order || 'DESC') === 'DESC';
+		const onePlayer = playerWhite && !playerBlack ? playerWhite : playerBlack && !playerWhite ? playerBlack : null;
+		const onlyPlayerAndFloor = Object.keys(search).every((k) => k === 'id' || k.startsWith('player_'));
+
+		if (mirror && idSort && onePlayer && !query['id'] && !/[%_]/.test(onePlayer) && onlyPlayerAndFloor) {
+			// reuse the operators generateSearchQuery already built: the player match
+			// Raw is column-agnostic, so it reads fine under `player_name`.
+			return { source: 'player_games', where: { player_name: search['player_white'] || search['player_black'], id: search['id'] } };
+		}
+		return { source: 'games', where: mirror ? [search, mirrorSearch] : search };
 	}
 
 	async getAll(query?: GameQuery): Promise<any> {
 		const limit = parseInt(query.limit) || 50;
-		const skip = parseInt(query.skip) || 0;
 		const page = parseInt(query.page) || 0;
+		const skip = limit * page || parseInt(query.skip) || 0;
 		const order: 'ASC' | 'DESC' = query.order || 'DESC';
-		const sort = query.sort ? query.sort : 'id';
-		const mirror = query.mirror === 'true' ? true : false;
-		const { search, mirrorSearch } = this.generateSearchQuery(query);
+		const sort = query.sort || 'id';
+		const { source, where } = this.planQuery(query);
 		try {
-			let dbQuery;
-			if (mirror) {
-				dbQuery = this.repository
-					.createQueryBuilder()
-					.select('*')
-					.where(search)
-					.orWhere(mirrorSearch)
-					.orderBy(sort, order);
-			} else {
-				dbQuery = this.repository.createQueryBuilder().select('*').where(search).orderBy(sort, order);
-			}
-
-			const total = await dbQuery.getCount();
-			const result = await dbQuery
-				.clone()
-				.limit(limit)
-				.offset(limit * page || skip)
-				.execute();
-
+			const repo = source === 'player_games' ? this.playerGamesRepository : this.repository;
+			const [items, total] = await repo.findAndCount({ where, order: { [sort]: order }, take: limit, skip });
 			return {
-				items: result || [],
+				items: items || [],
 				total: total || 0,
 				page: page + 1,
 				perPage: limit,

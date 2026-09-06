@@ -626,20 +626,30 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 					else if (game == null && (m = seekV4Pattern.matcher(temp)).find()) {
 						Seek.seekStuffLock.lock();
 						try {
-							if (seek != null) {
-								Seek.removeSeek(seek.no);
-							}
 							int no = Integer.parseInt(m.group(1));
-							if (no == 0) {
-								Log("Seek remove");
-								seek = null;
+							// The seek format a client sends isn't tied to the version it declared,
+							// so refuse to post a seek this client couldn't itself play — it would
+							// be hidden from its own creator. Checked before the existing seek is
+							// touched, so a rejected command has no side effects. `no == 0` is a
+							// cancel, which stays valid whatever the remaining fields say.
+							GameSettings requested = GameSettings.of(Integer.parseInt(m.group(13)), "1".equals(m.group(4)));
+							if (no != 0 && !ProtocolFeature.isCompatible(this.protocolVersion, requested)) {
+								sendNOK();
 							} else {
-								Seek.COLOR clr = Seek.COLOR.ANY;
+								if (seek != null) {
+									Seek.removeSeek(seek.no);
+								}
+								if (no == 0) {
+									Log("Seek remove");
+									seek = null;
+								} else {
+									Seek.COLOR clr = Seek.COLOR.ANY;
 
-								if ("W".equals(m.group(5))) clr = Seek.COLOR.WHITE;
-								else if ("B".equals(m.group(5))) clr = Seek.COLOR.BLACK;
-								seek = Seek.newSeek(this, Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(3)), clr, Integer.parseInt(m.group(6)), Integer.parseInt(m.group(7)), Integer.parseInt(m.group(8)), Integer.parseInt(m.group(9)), Integer.parseInt(m.group(10)), Integer.parseInt(m.group(11)), Integer.parseInt(m.group(12)), "1".equals(m.group(4)), Integer.parseInt(m.group(13)), m.group(14), null);
-								Log("Seek " + seek.boardSize);
+									if ("W".equals(m.group(5))) clr = Seek.COLOR.WHITE;
+									else if ("B".equals(m.group(5))) clr = Seek.COLOR.BLACK;
+									seek = Seek.newSeek(this, Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(3)), clr, Integer.parseInt(m.group(6)), Integer.parseInt(m.group(7)), Integer.parseInt(m.group(8)), Integer.parseInt(m.group(9)), Integer.parseInt(m.group(10)), Integer.parseInt(m.group(11)), Integer.parseInt(m.group(12)), "1".equals(m.group(4)), Integer.parseInt(m.group(13)), m.group(14), null);
+									Log("Seek " + seek.boardSize);
+								}
 							}
 						} finally {
 							Seek.seekStuffLock.unlock();
@@ -749,7 +759,12 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 						Seek.seekStuffLock.lock();
 						try {
 							Seek sk = Seek.seeks.get(Integer.parseInt(m.group(1)));
-							if (sk != null && sk.client.player.getGame() == null && sk != seek && (sk.opponent.toLowerCase()
+							// A seek using a feature this protocol version can't be told about is
+							// refused outright, not merely hidden: the id can still reach an old
+							// client out of band (the HTTP seek list, a stale broadcast, a guess).
+							if (sk != null && !ProtocolFeature.isCompatible(this.protocolVersion, sk)) {
+								sendNOK();
+							} else if (sk != null && sk.client.player.getGame() == null && sk != seek && (sk.opponent.toLowerCase()
 								.equals(player.getName().toLowerCase()) || sk.opponent.equals(""))) {
 								Client otherClient = sk.client;
 								int sz = sk.boardSize;
@@ -789,35 +804,42 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 					else if (game == null && (m = rematchV2Pattern.matcher(temp)).find()) {
 						Seek.seekStuffLock.lock();
 						try {
-							if (seek != null) {
-								Seek.removeSeek(seek.no);
-							}
-							Seek sk = null;
-							for (Seek s : Seek.seeks.values()) {
-								if (s.rematchId == Integer.parseInt(m.group(1))) {
-									sk = s;
-									break;
-								}
-							}
-							if (sk != null && sk.opponent.toLowerCase().equals(player.getName().toLowerCase())) {
-								send("Accept Rematch " + sk.no);
+							// Same guard as the V4 seek path, checked before the existing seek is
+							// touched so a rejected rematch has no side effects.
+							GameSettings requested = GameSettings.of(Integer.parseInt(m.group(14)), "1".equals(m.group(5)));
+							if (!ProtocolFeature.isCompatible(this.protocolVersion, requested)) {
+								sendNOK();
 							} else {
-								seek = Seek.newRematchSeek(this, Integer.parseInt(m.group(1)), // ID
-									Integer.parseInt(m.group(2)), // size
-									Integer.parseInt(m.group(3)), // time
-									Integer.parseInt(m.group(4)), // increment
-									m.group(6), // color
-									Integer.parseInt(m.group(7)), // komi
-									Integer.parseInt(m.group(8)), // pieces
-									Integer.parseInt(m.group(9)), // capstones
-									Integer.parseInt(m.group(10)), // unrated
-									Integer.parseInt(m.group(11)), // tournament
-									Integer.parseInt(m.group(12)), // triggerMove
-									Integer.parseInt(m.group(13)), // timeAmount
-									"1".equals(m.group(5)), // incrementScales
-									Integer.parseInt(m.group(14)), // opening
-									m.group(15)); // opponent
-								send("Rematch seek created with ID: " + seek.no);
+								if (seek != null) {
+									Seek.removeSeek(seek.no);
+								}
+								Seek sk = null;
+								for (Seek s : Seek.seeks.values()) {
+									if (s.rematchId == Integer.parseInt(m.group(1))) {
+										sk = s;
+										break;
+									}
+								}
+								if (sk != null && sk.opponent.toLowerCase().equals(player.getName().toLowerCase())) {
+									send("Accept Rematch " + sk.no);
+								} else {
+									seek = Seek.newRematchSeek(this, Integer.parseInt(m.group(1)), // ID
+										Integer.parseInt(m.group(2)), // size
+										Integer.parseInt(m.group(3)), // time
+										Integer.parseInt(m.group(4)), // increment
+										m.group(6), // color
+										Integer.parseInt(m.group(7)), // komi
+										Integer.parseInt(m.group(8)), // pieces
+										Integer.parseInt(m.group(9)), // capstones
+										Integer.parseInt(m.group(10)), // unrated
+										Integer.parseInt(m.group(11)), // tournament
+										Integer.parseInt(m.group(12)), // triggerMove
+										Integer.parseInt(m.group(13)), // timeAmount
+										"1".equals(m.group(5)), // incrementScales
+										Integer.parseInt(m.group(14)), // opening
+										m.group(15)); // opponent
+									send("Rematch seek created with ID: " + seek.no);
+								}
 							}
 						} finally {
 							Seek.seekStuffLock.unlock();
@@ -979,7 +1001,11 @@ public class Client extends Thread implements Publisher<GameUpdate> {
 					//ObserveGame
 					else if ((m = observePattern.matcher(temp)).find()) {
 						game = Game.games.get(Integer.parseInt(m.group(1)));
-						if (game != null) {
+						// A spectator desyncs exactly as a player would, so refuse the same games
+						// the game list withholds rather than hand over a position that won't render.
+						if (game != null && !ProtocolFeature.isCompatible(this.protocolVersion, game)) {
+							sendNOK();
+						} else if (game != null) {
 							game.gameLock.lock();
 							try {
 								spectating.add(game);

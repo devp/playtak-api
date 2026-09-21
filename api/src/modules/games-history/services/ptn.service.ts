@@ -1,3 +1,5 @@
+import { LEGACY_GAMES_ANONYMIZED_FROM_RESULTS, LEGACY_GAMES_CUTOFF } from '../../../config/feature-flags';
+
 export class PTNService {
 	public getHeader(key: string, val: any) {
 		return `[${key} "${val}"]\n`;
@@ -118,9 +120,9 @@ export class PTNService {
 
 	public getPTN(game: any) {
 		let ptn = '';
-		const wn = game.date < 1461430800000 ? 'Anon' : game.player_white;
+		const wn = LEGACY_GAMES_ANONYMIZED_FROM_RESULTS && game.date < LEGACY_GAMES_CUTOFF ? 'Anon' : game.player_white;
 		const wr = game.rating_white;
-		const bn = game.date < 1461430800000 ? 'Anon' : game.player_black;
+		const bn = LEGACY_GAMES_ANONYMIZED_FROM_RESULTS && game.date < LEGACY_GAMES_CUTOFF ? 'Anon' : game.player_black;
 		const wb = game.rating_black;
 
 		ptn += this.getHeader('Site', 'PlayTak.com');

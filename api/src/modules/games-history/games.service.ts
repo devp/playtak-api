@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { stat } from 'fs/promises';
 import { Between, In, LessThan, Like, MoreThan, Repository } from 'typeorm';
+import { LEGACY_GAMES_ANONYMIZED_FROM_RESULTS, LEGACY_GAMES_CUTOFF } from '../../config/feature-flags';
 import { GameQuery } from '../dto/games/games.dto';
 import { Games } from './entities/games.entity';
 import { PTNService } from './services/ptn.service';
@@ -198,10 +199,10 @@ export class GamesService {
 		}
 		delete search['game_result'];
 		delete mirrorSearch['game_result'];
-		if (player_search) {
-			search['date'] = MoreThan('1461430800000');
+		if (player_search && LEGACY_GAMES_ANONYMIZED_FROM_RESULTS) {
+			search['date'] = MoreThan(LEGACY_GAMES_CUTOFF.toString());
 			if (mirror) {
-				mirrorSearch['date'] = MoreThan('1461430800000');
+				mirrorSearch['date'] = MoreThan(LEGACY_GAMES_CUTOFF.toString());
 			}
 		}
 

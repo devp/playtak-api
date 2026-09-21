@@ -223,34 +223,16 @@ export class GamesService {
 
 	async getAll(query?: GameQuery): Promise<any> {
 		const limit = parseInt(query.limit) || 50;
-		const skip = parseInt(query.skip) || 0;
 		const page = parseInt(query.page) || 0;
+		const skip = limit * page || parseInt(query.skip) || 0;
 		const order: 'ASC' | 'DESC' = query.order || 'DESC';
-		const sort = query.sort ? query.sort : 'id';
-		const mirror = query.mirror === 'true' ? true : false;
+		const sort = query.sort || 'id';
 		const { search, mirrorSearch } = this.generateSearchQuery(query);
+		const where = query.mirror === 'true' ? [search, mirrorSearch] : search;
 		try {
-			let dbQuery;
-			if (mirror) {
-				dbQuery = this.repository
-					.createQueryBuilder()
-					.select('*')
-					.where(search)
-					.orWhere(mirrorSearch)
-					.orderBy(sort, order);
-			} else {
-				dbQuery = this.repository.createQueryBuilder().select('*').where(search).orderBy(sort, order);
-			}
-
-			const total = await dbQuery.getCount();
-			const result = await dbQuery
-				.clone()
-				.limit(limit)
-				.offset(limit * page || skip)
-				.execute();
-
+			const [items, total] = await this.repository.findAndCount({ where, order: { [sort]: order }, take: limit, skip });
 			return {
-				items: result || [],
+				items: items || [],
 				total: total || 0,
 				page: page + 1,
 				perPage: limit,

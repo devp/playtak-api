@@ -8,41 +8,19 @@ import { PTNService } from './services/ptn.service';
 describe('GamesService', () => {
 	let service: GamesService;
 
-	const mockRepo = {
-		findAndCount: vi.fn().mockImplementation(() => [[{ sn: '1234' }], 1]),
-		findOne: vi.fn(),
-		findByIds: vi.fn(),
-		find: vi.fn(),
-		save: vi.fn(),
-		update: vi.fn(),
-		delete: vi.fn(),
-		createQueryBuilder: vi.fn(() => ({
-			select: () => vi.fn(),
-			where: () => vi.fn(),
-			orWhere: () => vi.fn(),
-			from: () => vi.fn(),
-			whereInIds: () => vi.fn(),
-			orderBy: () => vi.fn(),
-			groupBy: () => vi.fn(),
-			delete: () => vi.fn(),
-			execute: () => vi.fn()
-		})),
-		manager: {
-			connection: {
-				transaction: vi.fn()
-			}
-		}
-	};
+	// getAll reads via findAndCount; nothing else here touches the DB.
+	type FindArgs = { where: any; order: any; take: number; skip: number };
+	const findAndCount = (rows: any[], total: number) =>
+		vi.fn(async (_opts: FindArgs): Promise<[any[], number]> => [rows, total]);
+	const mockRepo = { findAndCount: findAndCount([{ id: 1 }], 1), findOne: vi.fn() };
 
 	beforeEach(async () => {
+		mockRepo.findAndCount.mockClear();
 		const module: TestingModule = await Test.createTestingModule({
 			providers: [
 				GamesService,
 				PTNService,
-				{
-					provide: getRepositoryToken(Games, 'games'),
-					useValue: mockRepo
-				}
+				{ provide: getRepositoryToken(Games, 'games'), useValue: mockRepo }
 			]
 		}).compile();
 

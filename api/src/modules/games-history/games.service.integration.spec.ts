@@ -3,6 +3,7 @@ import { DataSource, Repository } from 'typeorm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { GameQuery } from '../dto/games/games.dto';
 import { Games } from './entities/games.entity';
+import { PlayerGames } from './entities/player-games.entity';
 import { GamesService } from './games.service';
 import { PTNService } from './services/ptn.service';
 
@@ -40,6 +41,12 @@ const FIXTURES: Row[] = [
 	{ id: 9901, date: POST, player_white: 'theta', player_black: 'zeta', result: '0-1', size: 7 }
 ];
 
+const VIEW_SQL =
+	'CREATE VIEW player_games AS ' +
+	'SELECT games.*, player_white AS player_name FROM games ' +
+	'UNION ALL ' +
+	'SELECT games.*, player_black AS player_name FROM games WHERE player_black <> player_white';
+
 let ds: DataSource;
 let svc: GamesService;
 
@@ -47,13 +54,14 @@ beforeAll(async () => {
 	ds = new DataSource({
 		type: 'better-sqlite3',
 		database: ':memory:',
-		entities: [Games],
+		entities: [Games, PlayerGames],
 		synchronize: true
 	});
 	await ds.initialize();
 	const repo: Repository<Games> = ds.getRepository(Games);
 	await repo.insert(FIXTURES.map((r) => ({ notation: '', extra_time_amount: 0, extra_time_trigger: 0, ...r })));
-	svc = new GamesService(repo, new PTNService());
+	await ds.query(VIEW_SQL);
+	svc = new GamesService(repo, ds.getRepository(PlayerGames), new PTNService());
 });
 
 afterAll(async () => {
@@ -133,5 +141,19 @@ describe('GamesService.getAll — search behaviour', () => {
 		const res = await svc.getAll({ mirror: 'false', limit: '100' });
 		expect(ids(res)).toEqual([...ids(res)].sort((a, b) => b - a));
 		expect(res.total).toBe(FIXTURES.length);
+	});
+
+	it('view path and games-table path agree for the same logical query', async () => {
+		const q = { player_black: 'AaaarghBot', mirror: 'true' };
+		expect(svc.planQuery(q).source).toBe('player_games');
+		const viaView = await svc.getAll(q);
+
+		// a sort the view cannot serve from its MERGE forces the games-table OR;
+		// id is unique here, so the two orderings must agree row for row
+		const tableQ = { ...q, sort: 'id', order: 'DESC' as const, date: `>0` };
+		expect(svc.planQuery({ ...q, sort: 'date' }).source).toBe('games');
+		const viaTable = await svc.getAll({ ...tableQ, sort: 'date' });
+		expect(new Set(ids(viaTable))).toEqual(new Set(ids(viaView)));
+		expect(viaTable.total).toBe(viaView.total);
 	});
 });

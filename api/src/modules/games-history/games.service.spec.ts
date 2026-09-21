@@ -1,26 +1,32 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { vi } from 'vitest';
+import { GameQuery } from '../dto/games/games.dto';
 import { Games } from './entities/games.entity';
+import { PlayerGames } from './entities/player-games.entity';
 import { GamesService } from './games.service';
 import { PTNService } from './services/ptn.service';
 
 describe('GamesService', () => {
 	let service: GamesService;
 
-	// getAll reads via findAndCount; nothing else here touches the DB.
+	// getAll reads via findAndCount on one repo or the other; nothing else here
+	// touches the DB.
 	type FindArgs = { where: any; order: any; take: number; skip: number };
 	const findAndCount = (rows: any[], total: number) =>
 		vi.fn(async (_opts: FindArgs): Promise<[any[], number]> => [rows, total]);
 	const mockRepo = { findAndCount: findAndCount([{ id: 1 }], 1), findOne: vi.fn() };
+	const mockViewRepo = { findAndCount: findAndCount([], 0) };
 
 	beforeEach(async () => {
 		mockRepo.findAndCount.mockClear();
+		mockViewRepo.findAndCount.mockClear();
 		const module: TestingModule = await Test.createTestingModule({
 			providers: [
 				GamesService,
 				PTNService,
-				{ provide: getRepositoryToken(Games, 'games'), useValue: mockRepo }
+				{ provide: getRepositoryToken(Games, 'games'), useValue: mockRepo },
+				{ provide: getRepositoryToken(PlayerGames, 'games'), useValue: mockViewRepo }
 			]
 		}).compile();
 
@@ -314,6 +320,70 @@ describe('GamesService', () => {
 			const { search } = service.generateSearchQuery(mock);
 			expect(search['extra_time_trigger']).toEqual(20);
 		});
+	});
+
+	describe('getAll player path (reads the player_games view)', () => {
+		it('queries the view for ?player_white=X&mirror=true', async () => {
+			mockViewRepo.findAndCount.mockResolvedValueOnce([[{ id: 5 }, { id: 4 }], 2]);
+			const res = await service.getAll({ player_white: 'AaaarghBot', mirror: 'true', limit: '50', page: '0' });
+
+			expect(mockViewRepo.findAndCount).toHaveBeenCalledTimes(1);
+			expect(mockRepo.findAndCount).not.toHaveBeenCalled();
+			const opts = mockViewRepo.findAndCount.mock.calls[0][0];
+			expect(opts.where.player_name._type).toEqual('raw');
+			expect(opts.where.player_name._objectLiteralParameters).toEqual({ pw: 'AaaarghBot' });
+			expect(opts.order).toEqual({ id: 'DESC' });
+			expect(opts.take).toEqual(50);
+			expect(opts.skip).toEqual(0);
+			expect(res).toEqual({ items: [{ id: 5 }, { id: 4 }], total: 2, page: 1, perPage: 50, totalPages: 1 });
+		});
+
+		it('never leaves a player_white/player_black key on the view where', async () => {
+			await service.getAll({ player_black: 'X', mirror: 'true' });
+			const { where } = mockViewRepo.findAndCount.mock.calls[0][0];
+			expect(Object.keys(where)).toEqual(['player_name']);
+		});
+
+		it('passes page*limit as skip', async () => {
+			await service.getAll({ player_black: 'x', mirror: 'true', limit: '50', page: '3' });
+			expect(mockViewRepo.findAndCount.mock.calls[0][0].skip).toEqual(150);
+		});
+
+		const usesView = async (q: Record<string, string>) => {
+			await service.getAll(q as unknown as GameQuery);
+			expect(mockViewRepo.findAndCount).toHaveBeenCalled();
+			expect(mockRepo.findAndCount).not.toHaveBeenCalled();
+			return mockViewRepo.findAndCount.mock.calls[0][0];
+		};
+
+		const fallsBack = async (q: Record<string, string>) => {
+			await service.getAll(q as unknown as GameQuery);
+			expect(mockViewRepo.findAndCount).not.toHaveBeenCalled();
+			expect(mockRepo.findAndCount).toHaveBeenCalled();
+		};
+
+		// Side-independent filters AND onto the view and keep its MERGE plan, so
+		// they stay on the fast path rather than falling back to the OR.
+		it('keeps the view for an extra filter', async () => {
+			const opts = await usesView({ player_white: 'X', mirror: 'true', size: '6' });
+			expect(opts.where.size).toEqual('6');
+		});
+		it('keeps the view for an explicit id range', async () => {
+			const opts = await usesView({ player_white: 'X', mirror: 'true', id: '5-100' });
+			expect(opts.where.id._type).toEqual('between');
+		});
+		it('keeps the view for ascending id order', async () => {
+			const opts = await usesView({ player_white: 'X', mirror: 'true', order: 'ASC' });
+			expect(opts.order).toEqual({ id: 'ASC' });
+		});
+
+		it('falls back: wildcard', () => fallsBack({ player_white: 'Aaa%', mirror: 'true' }));
+		it('falls back: both players', () => fallsBack({ player_white: 'a', player_black: 'b', mirror: 'true' }));
+		it('falls back: no player', () => fallsBack({ size: '6', mirror: 'true' }));
+		it('falls back: mirror off', () => fallsBack({ player_white: 'X', mirror: 'false' }));
+		it('falls back: non-id sort', () => fallsBack({ player_white: 'X', mirror: 'true', sort: 'date' }));
+		it('falls back: game_result (mirrored value is side-dependent)', () =>
+			fallsBack({ player_white: 'X', mirror: 'true', game_result: '1-0' }));
 	});
 
 	describe('validate ID search', () => {

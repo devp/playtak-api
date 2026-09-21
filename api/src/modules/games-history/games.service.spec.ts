@@ -120,6 +120,12 @@ describe('GamesService', () => {
 			expect(mirrorSearch['date']).toBeUndefined();
 		});
 
+		it('parses an explicit id range', () => {
+			const { search } = service.generateSearchQuery({ player_white: 'bcreature', id: '5-100', mirror: 'false' });
+			expect(search['id']._type).toEqual('between');
+			expect(search['id']._value).toEqual([5, 100]);
+		});
+
 		it('Should return the correct values for normal', () => {
 			const mockQuery = {
 				type: 'normal',

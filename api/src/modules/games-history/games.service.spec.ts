@@ -105,10 +105,12 @@ describe('GamesService', () => {
 			const { search, mirrorSearch } = service.generateSearchQuery(mockQuery);
 			expect(search['player_white']._value).toEqual('bcreature');
 			expect(search['player_white']._type).toEqual('like');
-			expect(search['date']._value).toEqual('1461430800000');
-			expect(search['date']._type).toEqual('moreThan');
+			// LEGACY_GAMES_ANONYMIZED_FROM_RESULTS is off, so a player search adds no
+			// date floor of its own.
+			expect(search['date']).toBeUndefined();
 			expect(mirrorSearch['player_black']._value).toEqual('bcreature');
 			expect(mirrorSearch['player_black']._type).toEqual('like');
+			expect(mirrorSearch['date']).toBeUndefined();
 		});
 
 		it('Should return the correct values for normal', () => {

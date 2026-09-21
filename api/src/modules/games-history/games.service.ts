@@ -1,11 +1,23 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { stat } from 'fs/promises';
-import { Between, In, LessThan, Like, MoreThan, Repository } from 'typeorm';
+import { Between, In, LessThan, Like, MoreThan, Raw, Repository } from 'typeorm';
 import { LEGACY_GAMES_ANONYMIZED_FROM_RESULTS, LEGACY_GAMES_CUTOFF } from '../../config/feature-flags';
 import { GameQuery } from '../dto/games/games.dto';
 import { Games } from './entities/games.entity';
 import { PTNService } from './services/ptn.service';
+
+/**
+ * Query helper: based on the param, chooses the right where clause.
+ *
+ * - If wildcard explicitly included, use LIKE (which in sqlite default to case-insensitive)
+ * - Otherwise (default and most common case), use equality with COLLATE NOCASE, in order
+ *   to use the case insensitive index performantly.
+ */
+const playerMatch = (value: string, param: string) => {
+	if (/[%_]/.test(value)) return Like(`${value}`);
+	return Raw((col) => `${col} = :${param} COLLATE NOCASE`, { [param]: value });
+};
 
 @Injectable()
 export class GamesService {
@@ -131,11 +143,11 @@ export class GamesService {
 		const playerWhite = search['player_white'];
 		const playerBlack = search['player_black'];
 		if (playerWhite) {
-			search['player_white'] = Like(`${playerWhite}`);
+			search['player_white'] = playerMatch(playerWhite, 'pw');
 			player_search = true;
 		}
 		if (playerBlack) {
-			search['player_black'] = Like(`${playerBlack}`);
+			search['player_black'] = playerMatch(playerBlack, 'pb');
 			player_search = true;
 		}
 
@@ -155,11 +167,11 @@ export class GamesService {
 			delete mirrorSearch['player_black'];
 			delete mirrorSearch['player_white'];
 			if (playerWhite) {
-				mirrorSearch['player_black'] = Like(`${playerWhite}`);
+				mirrorSearch['player_black'] = playerMatch(playerWhite, 'pwm');
 				player_search = true;
 			}
 			if (playerBlack) {
-				mirrorSearch['player_white'] = Like(`${playerBlack}`);
+				mirrorSearch['player_white'] = playerMatch(playerBlack, 'pbm');
 				player_search = true;
 			}
 			if (search['game_result']) {

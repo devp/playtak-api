@@ -80,9 +80,16 @@ describe('GamesService', () => {
 		it('Should return the correct values for player white and empty for mirror', () => {
 			const mockQuery = { player_white: 'bcreature', mirror: 'false' };
 			const { search, mirrorSearch } = service.generateSearchQuery(mockQuery);
-			expect(search['player_white']._value).toEqual('bcreature');
-			expect(search['player_white']._type).toEqual('like');
+			// wildcard-free -> `= ? COLLATE NOCASE` (a Raw operator), not LIKE
+			expect(search['player_white']._type).toEqual('raw');
+			expect(search['player_white']._objectLiteralParameters).toEqual({ pw: 'bcreature' });
 			expect(mirrorSearch).toStrictEqual({});
+		});
+
+		it('keeps LIKE when the player value contains a wildcard', () => {
+			const { search } = service.generateSearchQuery({ player_white: 'bcr%', mirror: 'false' });
+			expect(search['player_white']._type).toEqual('like');
+			expect(search['player_white']._value).toEqual('bcr%');
 		});
 
 		it('Should return the correct values for player black and empty for mirror', () => {
@@ -91,10 +98,10 @@ describe('GamesService', () => {
 				mirror: 'true'
 			};
 			const { search, mirrorSearch } = service.generateSearchQuery(mockQuery);
-			expect(search['player_black']._value).toEqual('bcreature');
-			expect(search['player_black']._type).toEqual('like');
-			expect(mirrorSearch['player_white']._value).toEqual('bcreature');
-			expect(mirrorSearch['player_white']._type).toEqual('like');
+			expect(search['player_black']._type).toEqual('raw');
+			expect(search['player_black']._objectLiteralParameters).toEqual({ pb: 'bcreature' });
+			expect(mirrorSearch['player_white']._type).toEqual('raw');
+			expect(mirrorSearch['player_white']._objectLiteralParameters).toEqual({ pbm: 'bcreature' });
 		});
 
 		it('Should return the correct values for player white and empty for mirror', () => {
@@ -103,13 +110,13 @@ describe('GamesService', () => {
 				mirror: 'true'
 			};
 			const { search, mirrorSearch } = service.generateSearchQuery(mockQuery);
-			expect(search['player_white']._value).toEqual('bcreature');
-			expect(search['player_white']._type).toEqual('like');
+			expect(search['player_white']._type).toEqual('raw');
+			expect(search['player_white']._objectLiteralParameters).toEqual({ pw: 'bcreature' });
 			// LEGACY_GAMES_ANONYMIZED_FROM_RESULTS is off, so a player search adds no
 			// date floor of its own.
 			expect(search['date']).toBeUndefined();
-			expect(mirrorSearch['player_black']._value).toEqual('bcreature');
-			expect(mirrorSearch['player_black']._type).toEqual('like');
+			expect(mirrorSearch['player_black']._type).toEqual('raw');
+			expect(mirrorSearch['player_black']._objectLiteralParameters).toEqual({ pwm: 'bcreature' });
 			expect(mirrorSearch['date']).toBeUndefined();
 		});
 
